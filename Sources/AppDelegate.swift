@@ -130,13 +130,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         guard batteryManager.hasBattery else { return }
         let threshold = UserDefaults.standard.integer(forKey: "batteryThreshold")
         
-        // Reset ignored state if charging or above threshold
-        if batteryManager.isCharging || batteryManager.batteryLevel > threshold {
+        let isPluggedIn = batteryManager.isCharging || (batteryManager.powerSource == "Power Adapter")
+        
+        // Reset ignored state if charging/plugged in or above threshold
+        if isPluggedIn || batteryManager.batteryLevel > threshold {
             notificationManager.isIgnored = false
             notificationManager.cancelBatteryAlert()
         }
         
-        if batteryManager.batteryLevel <= threshold && !batteryManager.isCharging {
+        if batteryManager.batteryLevel <= threshold && !isPluggedIn {
             notificationManager.sendBatteryAlert(level: batteryManager.batteryLevel)
         }
     }
