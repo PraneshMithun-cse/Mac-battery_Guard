@@ -7,8 +7,7 @@ import AppKit
 
 class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
 
-    private var lastNotificationTime: Date?
-    private let cooldownSeconds: TimeInterval = 600  // 10 minutes
+    var isIgnored: Bool = false
 
     override init() {
         super.init()
@@ -30,14 +29,14 @@ class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
 
     // MARK: - Category with OK button
     private func setupCategories() {
-        let okAction = UNNotificationAction(
-            identifier: "OK_ACTION",
-            title: "OK",
-            options: []
+        let ignoreAction = UNNotificationAction(
+            identifier: "IGNORE_ACTION",
+            title: "Ignore",
+            options: [] // no special options needed
         )
         let category = UNNotificationCategory(
             identifier: "BATTERY_ALERT",
-            actions: [okAction],
+            actions: [ignoreAction],
             intentIdentifiers: [],
             options: [.customDismissAction]
         )
@@ -46,20 +45,16 @@ class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
 
     // MARK: - Send Alert
     func sendBatteryAlert(level: Int) {
-        // Enforce 10-minute cooldown
-        if let last = lastNotificationTime,
-           Date().timeIntervalSince(last) < cooldownSeconds {
-            return
-        }
+        if isIgnored { return }
 
         let content = UNMutableNotificationContent()
         content.title = "Battery Alert"
-        content.body = "Charge your Mac 🔋"
+        content.body = "Battery is at \(level)%. Charge your Mac 🔋"
         content.categoryIdentifier = "BATTERY_ALERT"
         content.sound = .default
 
         let request = UNNotificationRequest(
-            identifier: "battery-alert-\(UUID().uuidString)",
+            identifier: "battery-alert",
             content: content,
             trigger: nil  // deliver immediately
         )
@@ -69,8 +64,6 @@ class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
                 print("⚠️ Failed to send notification: \(error.localizedDescription)")
             }
         }
-
-        lastNotificationTime = Date()
 
         // Play system sound if enabled
         if UserDefaults.standard.bool(forKey: "soundEnabled") {
@@ -87,13 +80,21 @@ class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         completionHandler([.banner, .sound])
     }
 
-    // MARK: - Delegate: handle OK button tap
+    // MARK: - Delegate: handle Ignore button tap
     func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
-        // Notification dismissed (OK tapped or clicked)
+        if response.actionIdentifier == "IGNORE_ACTION" {
+            isIgnored = true
+        }
         completionHandler()
+    }
+    
+    // MARK: - Cancel Alert
+    func cancelBatteryAlert() {
+        UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: ["battery-alert"])
+        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: ["battery-alert"])
     }
 }

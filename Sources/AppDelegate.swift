@@ -3,6 +3,7 @@
 
 import Cocoa
 import SwiftUI
+import IOKit.ps
 
 class AppDelegate: NSObject, NSApplicationDelegate {
 
@@ -10,6 +11,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var popover: NSPopover!
     private var monitorTimer: Timer?
+    private var loopSource: CFRunLoopSource?
 
     let batteryManager = BatteryManager()
     let notificationManager = NotificationManager()
@@ -36,16 +38,22 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         batteryManager.updateBatteryInfo()
         updateStatusBarDisplay()
 
-        // Periodic monitoring every 60 seconds
+        // Periodic monitoring every 10 seconds
         monitorTimer = Timer.scheduledTimer(
-            withTimeInterval: 60, repeats: true
+            withTimeInterval: 10, repeats: true
         ) { [weak self] _ in
             self?.performPeriodicCheck()
         }
+
+        // Instant power source change detection
+        setupPowerSourceMonitor()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         monitorTimer?.invalidate()
+        if let source = loopSource {
+            CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .defaultMode)
+        }
     }
 
     // MARK: - Setup
@@ -67,6 +75,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         popover.behavior = .transient
         popover.animates = true
         popover.contentViewController = NSHostingController(rootView: contentView)
+    }
+
+    private func setupPowerSourceMonitor() {
+        let context = UnsafeMutableRawPointer(Unmanaged.passUnretained(self).toOpaque())
+        loopSource = IOPSNotificationCreateRunLoopSource({ context in
+            if let ctx = context {
+                let appDelegate = Unmanaged<AppDelegate>.fromOpaque(ctx).takeUnretainedValue()
+                appDelegate.performPeriodicCheck()
+            }
+        }, context).takeRetainedValue()
+        
+        if let source = loopSource {
+            CFRunLoopAddSource(CFRunLoopGetMain(), source, .defaultMode)
+        }
     }
 
     // MARK: - Monitoring
@@ -96,6 +118,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if let img = NSImage(systemSymbolName: symbolName, accessibilityDescription: "Battery") {
             let cfg = NSImage.SymbolConfiguration(pointSize: 14, weight: .medium)
             button.image = img.withSymbolConfiguration(cfg)
+            button.imagePosition = .imageLeft
             button.title = " \(level)%"
         } else {
             button.image = nil
@@ -106,6 +129,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func checkBatteryAndNotify() {
         guard batteryManager.hasBattery else { return }
         let threshold = UserDefaults.standard.integer(forKey: "batteryThreshold")
+        
+        // Reset ignored state if charging or above threshold
+        if batteryManager.isCharging || batteryManager.batteryLevel > threshold {
+            notificationManager.isIgnored = false
+            notificationManager.cancelBatteryAlert()
+        }
+        
         if batteryManager.batteryLevel <= threshold && !batteryManager.isCharging {
             notificationManager.sendBatteryAlert(level: batteryManager.batteryLevel)
         }
